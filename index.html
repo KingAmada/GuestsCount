@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Wedding Guest App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #app-wrapper {
+            background-color: #f3f4f6; /* Light gray background for the page */
+        }
+        #app-container {
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100vh; /* Full height on mobile */
+        }
+        @media (min-width: 768px) {
+            #app-container {
+                max-height: 90vh; /* Limit height on desktop */
+                border-radius: 1.5rem; /* Rounded corners on desktop */
+                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            }
+        }
+        .view {
+            display: none;
+            animation: fadeIn 0.5s forwards;
+        }
+        .view.active { display: block; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .modal {
+            display: none;
+            animation: modalFadeIn 0.3s forwards;
+        }
+        .modal.active { display: flex; }
+        .modal-content {
+            animation: modalSlideIn 0.3s forwards;
+        }
+        @keyframes modalFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes modalSlideIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        #qr-reader {
+            border: none !important;
+        }
+    </style>
+</head>
+<body id="app-wrapper">
+    <div id="app-container" class="w-full max-w-md mx-auto bg-white">
+        <div id="app-content" class="relative z-10 p-6 md:p-8 h-full flex flex-col">
+
+            <!-- App Header -->
+            <header id="app-header" class="hidden text-center mb-4 relative">
+                <!-- Content injected dynamically -->
+            </header>
+
+            <main class="flex-grow py-4">
+                <!-- Language Selection View -->
+                <div id="language-view" class="view"></div>
+                
+                <!-- Welcome View -->
+                <div id="welcome-view" class="view active"></div>
+
+                <!-- Guest Views -->
+                <div id="guest-login-view" class="view"></div>
+                <div id="guest-dashboard-view" class="view"></div>
+
+                <!-- Couple Views -->
+                <div id="couple-login-view" class="view"></div>
+                <div id="couple-dashboard-view" class="view">
+                    <div id="dashboard-stats-view" class="dashboard-subview"></div>
+                    <div id="dashboard-charts-view" class="dashboard-subview hidden"></div>
+                    <div id="dashboard-guests-view" class="dashboard-subview hidden"></div>
+                </div>
+                 <!-- Usher Views -->
+                <div id="usher-pin-view" class="view"></div>
+                <div id="usher-add-guest-view" class="view"></div>
+            </main>
+
+            <!-- App Navigation -->
+            <nav id="app-nav" class="hidden mt-auto p-2 bg-gray-100 rounded-full flex justify-around items-center shadow-inner">
+                <!-- Nav buttons will be injected here -->
+            </nav>
+        </div>
+        
+        <!-- Modals -->
+        <div id="scanner-modal" class="modal fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4"></div>
+        <div id="tag-along-modal" class="modal fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4"></div>
+        <div id="message-box" class="fixed top-5 right-5 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg opacity-0 transition-all duration-300 -translate-y-10"></div>
+    </div>
+
+    <script>
+        // --- App State ---
+        let currentView = 'welcome-view';
+        let currentUser = null;
+        let currentEvent = null;
+        let currentLang = 'en';
+        let lastSubmissionTime = 0;
+        let html5QrCode;
+        const GUEST_STORAGE_KEY = 'weddingAppGuest_v3';
+        const EVENT_STORAGE_KEY = 'weddingAppEvent_v3';
+        const LANG_STORAGE_KEY = 'weddingAppLang_v3';
+        
+        // --- Multi-Language Strings ---
+        const i18n = {
+            en: {
+                welcome: "Welcome!",
+                selectRole: "Please select your role to continue.",
+                imGuest: "I'm a Guest",
+                weCouple: "We're the Couple",
+                usherMode: "Usher Mode",
+                guestSignIn: "Guest Sign In",
+                fullName: "Full Name",
+                phone: "Phone Number",
+                signInRegister: "Sign In / Register",
+                back: "Back",
+                welcomeGuest: "Welcome",
+                logout: "Logout",
+                checkIn: "Check In",
+                scanToJoin: "Scan the event QR code to join the celebration.",
+                scanQR: "Scan QR Code",
+                thankYou: "Thank you for celebrating with us!",
+                withLove: "With love from",
+                yourTable: "Your Table & Services",
+                enterTable: "Please enter your table number.",
+                set: "Set",
+                tableSetTo: "Your table is set to:",
+                foodReq: "Food Request",
+                drinksReq: "Drinks Request",
+                addGuests: "Add Guests",
+                coupleArea: "Couple's Area",
+                createEvent: "Create a New Event",
+                coupleNames: "Your Names (e.g., Alex & Jamie)",
+                eventCreated: "Event Created!",
+                scanToJoinGuests: "Guests can now scan this QR code.",
+                goToDash: "Go to Dashboard",
+                dash: "Dashboard",
+                totalGuests: "Total Guests",
+                guestsServed: "Guests Served",
+                liveReq: "Live Requests",
+                guestList: "Guest List",
+                charts: "Charts",
+                stats: "Stats",
+                requests: "Requests",
+                guests: "Guests",
+                noActiveReq: "No active requests.",
+                noGuestsYet: "No guests have joined yet.",
+                fulfill: "Fulfill",
+                usherPin: "Usher PIN",
+                enterPin: "Please enter the 4-digit PIN.",
+                submit: "Submit",
+                addGuestManual: "Add Guest Manually",
+                addGuest: "Add Guest",
+                addTagAlong: "Add Accompanying Guests",
+                numGuests: "Number of additional guests",
+                save: "Save",
+                selectLang: "Select Language",
+                lastCheckIn: "You are already checked in. Last check-in at:",
+                noTable: "No table?",
+                standing: "Standing",
+                assignTable: "Assign Table",
+                tableNumber: "Table Number"
+            },
+            fr: {
+                welcome: "Bienvenue!",
+                selectRole: "Veuillez sélectionner votre rôle pour continuer.",
+                imGuest: "Je suis un invité",
+                weCouple: "Nous sommes le couple",
+                usherMode: "Mode Placier",
+                guestSignIn: "Connexion invité",
+                fullName: "Nom complet",
+                phone: "Numéro de téléphone",
+                signInRegister: "Se connecter / S'inscrire",
+                back: "Retour",
+                welcomeGuest: "Bienvenue",
+                logout: "Déconnexion",
+                checkIn: "Enregistrement",
+                scanToJoin: "Scannez le code QR de l'événement pour vous joindre à la célébration.",
+                scanQR: "Scanner le QR",
+                thankYou: "Merci de célébrer avec nous!",
+                withLove: "Avec l'amour de",
+                yourTable: "Votre table et services",
+                enterTable: "Veuillez entrer votre numéro de table.",
+                set: "Définir",
+                tableSetTo: "Votre table est:",
+                foodReq: "Demande de nourriture",
+                drinksReq: "Demande de boissons",
+                addGuests: "Ajouter des invités",
+                coupleArea: "Espace Couple",
+                createEvent: "Créer un nouvel événement",
+                coupleNames: "Vos noms (ex: Alex & Jamie)",
+                eventCreated: "Événement créé!",
+                scanToJoinGuests: "Les invités peuvent maintenant scanner ce code QR.",
+                goToDash: "Aller au tableau de bord",
+                dash: "Tableau de bord",
+                totalGuests: "Invités au total",
+                guestsServed: "Invités servis",
+                liveReq: "Demandes en direct",
+                guestList: "Liste d'invités",
+                charts: "Graphiques",
+                stats: "Statistiques",
+                requests: "Demandes",
+                guests: "Invités",
+                noActiveReq: "Aucune demande active.",
+                noGuestsYet: "Aucun invité n'a encore rejoint.",
+                fulfill: "Satisfaire",
+                usherPin: "PIN du placier",
+                enterPin: "Veuillez entrer le PIN à 4 chiffres.",
+                submit: "Soumettre",
+                addGuestManual: "Ajouter un invité manuellement",
+                addGuest: "Ajouter l'invité",
+                addTagAlong: "Ajouter des accompagnateurs",
+                numGuests: "Nombre d'invités supplémentaires",
+                save: "Enregistrer",
+                selectLang: "Choisir la langue",
+                lastCheckIn: "Vous êtes déjà enregistré. Dernier enregistrement à:",
+                noTable: "Pas de table?",
+                standing: "Debout",
+                assignTable: "Attribuer une table",
+                tableNumber: "Numéro de table"
+            },
+            rw: {
+                welcome: "Murakaza neza!",
+                selectRole: "Hitamo uruhare rwawe kugirango ukomeze.",
+                imGuest: "Ndi umushyitsi",
+                weCouple: "Turi abageni",
+                usherMode: "Uburyo bw'abakira abashyitsi",
+                guestSignIn: "Kwinjira kw'abashyitsi",
+                fullName: "Amazina yose",
+                phone: "Nimero ya terefone",
+                signInRegister: "Injira / Iyandikishe",
+                back: "Subira inyuma",
+                welcomeGuest: "Ikaze",
+                logout: "Sohoka",
+                checkIn: "Kwiyandikisha",
+                scanToJoin: "Sikana QR code y'ibirori kugirango ubyinjiremo.",
+                scanQR: "Sikana QR",
+                thankYou: "Murakoze kwifatanya natwe!",
+                withLove: "Tubakunda cyane",
+                yourTable: "Ameza yawe na serivisi",
+                enterTable: "Shyiramo nimero y'ameza yawe.",
+                set: "Emeza",
+                tableSetTo: "Ameza yawe ni:",
+                foodReq: "Gusaba ibiryo",
+                drinksReq: "Gusaba ibinyobwa",
+                addGuests: "Ongeraho abashyitsi",
+                coupleArea: "Ahantu h'abageni",
+                createEvent: "Kora ibirori bishya",
+                coupleNames: "Amazina yanyu (urugero: Alex & Jamie)",
+                eventCreated: "Ibirori byakozwe!",
+                scanToJoinGuests: "Abashyitsi bashobora gusikana iyi QR code.",
+                goToDash: "Jya kuri Deshibodi",
+                dash: "Deshibodi",
+                totalGuests: "Abashyitsi bose",
+                guestsServed: "Abashyitsi bahawe serivisi",
+                liveReq: "Ibisabwa ako kanya",
+                guestList: "Urutonde rw'abashyitsi",
+                charts: "Imbonerahamwe",
+                stats: "Sitatisitiki",
+                requests: "Ibisabwa",
+                guests: "Abashyitsi",
+                noActiveReq: "Nta gisabwa gihari.",
+                noGuestsYet: "Nta bashyitsi baraza.",
+                fulfill: "Tanga",
+                usherPin: "PIN y'abakira abashyitsi",
+                enterPin: "Shyiramo PIN y'imibare 4.",
+                submit: "Emeza",
+                addGuestManual: "Ongeraho umushyitsi n'intoki",
+                addGuest: "Ongeraho umushyitsi",
+                addTagAlong: "Ongeraho abandi mufatanyije",
+                numGuests: "Umubare w'abashyitsi bongeweho",
+                save: "Bika",
+                selectLang: "Hitamo ururimi",
+                lastCheckIn: "Mwarangije kwiyandikisha. Igihe mwaherukiraho:",
+                noTable: "Nta meza?",
+                standing: "Uhagaze",
+                assignTable: "Tanga ameza",
+                tableNumber: "Nimero y'ameza"
+            }
+        };
+
+        // --- UI Templates ---
+        const templates = {
+            languageSelect: `
+                <h1 class="text-3xl font-bold text-center mb-4 text-indigo-600">${i18n[currentLang].selectLang}</h1>
+                <div class="space-y-4 mt-8">
+                    <button data-lang="en" class="lang-btn w-full bg-indigo-600 text-white font-bold py-4 px-4 rounded-lg">English</button>
+                    <button data-lang="fr" class="lang-btn w-full bg-gray-700 text-white font-bold py-4 px-4 rounded-lg">Français</button>
+                    <button data-lang="rw" class="lang-btn w-full bg-green-600 text-white font-bold py-4 px-4 rounded-lg">Kinyarwanda</button>
+                </div>`,
+            welcome: `
+                <h1 class="text-3xl font-bold text-center mb-4 text-indigo-600">${i18n[currentLang].welcome}</h1>
+                <p class="text-center text-gray-500 mb-8">${i18n[currentLang].selectRole}</p>
+                <div class="space-y-4">
+                    <button data-target="guest-login-view" class="role-btn w-full bg-indigo-600 text-white font-bold py-4 px-4 rounded-lg hover:bg-indigo-700 transition duration-300 text-lg transform hover:scale-105">${i18n[currentLang].imGuest}</button>
+                    <button data-target="couple-login-view" class="role-btn w-full bg-gray-700 text-white font-bold py-4 px-4 rounded-lg hover:bg-gray-800 transition duration-300 text-lg transform hover:scale-105">${i18n[currentLang].weCouple}</button>
+                    <button data-target="usher-pin-view" class="role-btn w-full bg-gray-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-gray-600 transition duration-300 mt-2">${i18n[currentLang].usherMode}</button>
+                </div>`,
+            guestLogin: `
+                <button class="back-btn text-indigo-600 mb-4">&larr; ${i18n[currentLang].back}</button>
+                <h2 class="text-2xl font-bold text-center mb-6">${i18n[currentLang].guestSignIn}</h2>
+                <form id="guest-login-form" class="space-y-4">
+                    <input type="text" id="guest-name" placeholder="${i18n[currentLang].fullName}" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <input type="tel" id="guest-phone" placeholder="${i18n[currentLang].phone}" required maxlength="11" pattern="[0-9]*" inputmode="numeric" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <button type="submit" class="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700 transition">${i18n[currentLang].signInRegister}</button>
+                </form>`,
+            guestDashboard: `
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-bold">${i18n[currentLang].welcomeGuest}, <span id="guest-name-display"></span>!</h2>
+                    <button id="guest-logout-btn" class="text-sm text-red-500 hover:underline">${i18n[currentLang].logout}</button>
+                </div>
+                <div id="guest-step-1" class="p-4 bg-gray-50 rounded-lg">
+                    <h3 class="font-bold text-lg mb-2">${i18n[currentLang].checkIn}</h3>
+                    <p class="text-gray-600 mb-4">${i18n[currentLang].scanToJoin}</p>
+                    <button id="scan-qr-btn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700">${i18n[currentLang].scanQR}</button>
+                </div>
+                <div id="thank-you-note" class="hidden my-4 p-4 border border-indigo-200 bg-indigo-50 rounded-lg text-center"></div>
+                <div id="guest-step-2" class="hidden mt-4 p-4 bg-gray-50 rounded-lg"></div>`,
+            coupleLogin: `
+                <button class="back-btn text-indigo-600 mb-4">&larr; ${i18n[currentLang].back}</button>
+                <h2 class="text-2xl font-bold text-center mb-6">${i18n[currentLang].coupleArea}</h2>
+                <div id="create-event-section" class="p-4 bg-gray-50 rounded-lg mb-6">
+                    <h3 class="font-bold text-lg mb-2">${i18n[currentLang].createEvent}</h3>
+                    <form id="create-event-form" class="space-y-3">
+                        <input type="text" id="couple-names-input" placeholder="${i18n[currentLang].coupleNames}" required class="w-full px-4 py-3 border border-gray-300 rounded-lg">
+                        <button type="submit" class="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700">${i18n[currentLang].createEvent}</button>
+                    </form>
+                </div>
+                <div id="event-qr-display" class="hidden text-center p-4 bg-green-50 border border-green-200 rounded-lg"></div>`,
+            dashboardStats: `
+                <div class="grid grid-cols-2 gap-4 mb-4 text-center">
+                    <div class="bg-indigo-100 p-3 rounded-lg">
+                        <p class="text-3xl font-bold text-indigo-800" id="total-guests-count">0</p>
+                        <p class="text-sm font-semibold text-indigo-600">${i18n[currentLang].totalGuests}</p>
+                    </div>
+                    <div class="bg-green-100 p-3 rounded-lg">
+                        <p class="text-3xl font-bold text-green-800" id="served-guests-count">0</p>
+                        <p class="text-sm font-semibold text-green-600">${i18n[currentLang].guestsServed}</p>
+                    </div>
+                </div>
+                <div id="requests-feed" class="space-y-2">
+                    <h3 class="font-bold">${i18n[currentLang].liveReq}</h3>
+                    <div id="requests-list" class="max-h-96 overflow-y-auto p-2 bg-gray-50 rounded-lg"></div>
+                </div>`,
+            dashboardCharts: `
+                <div>
+                    <h3 class="font-bold mb-2">Service Status</h3>
+                    <canvas id="service-pie-chart"></canvas>
+                </div>
+                <div class="mt-6">
+                    <h3 class="font-bold mb-2">Guests per Table</h3>
+                    <canvas id="table-bar-chart"></canvas>
+                </div>`,
+            dashboardGuests: `<div id="guest-list-section">
+                                <h3 class="font-bold">${i18n[currentLang].guestList}</h3>
+                                <div id="dashboard-guest-list" class="max-h-96 overflow-y-auto p-2 bg-gray-50 rounded-lg"></div>
+                              </div>`,
+            scannerModal: `
+                <div class="modal-content w-full max-w-sm">
+                    <h2 class="text-white text-xl font-bold mb-4 text-center">Scanning...</h2>
+                    <div id="qr-reader" class="w-full aspect-square bg-gray-500 rounded-lg overflow-hidden"></div>
+                    <button id="close-scanner-btn" class="mt-4 w-full bg-red-600 text-white font-bold py-2 px-6 rounded-lg">Cancel</button>
+                </div>`,
+            tagAlongModal: `
+                <div class="modal-content w-full max-w-sm bg-white p-6 rounded-lg">
+                    <h2 class="text-xl font-bold mb-4">${i18n[currentLang].addTagAlong}</h2>
+                    <form id="tag-along-form">
+                        <label for="tag-along-count" class="block text-sm font-medium text-gray-700">${i18n[currentLang].numGuests}</label>
+                        <input type="number" id="tag-along-count" min="0" value="0" pattern="[0-9]*" inputmode="numeric" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                        <div class="mt-4 flex justify-end space-x-2">
+                            <button type="button" id="close-tag-along-btn" class="bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg">${i18n[currentLang].back}</button>
+                            <button type="submit" class="bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg">${i18n[currentLang].save}</button>
+                        </div>
+                    </form>
+                </div>`,
+            usherPin: `
+                <button class="back-btn text-indigo-600 mb-4">&larr; ${i18n[currentLang].back}</button>
+                <h2 class="text-2xl font-bold text-center mb-6">${i18n[currentLang].usherPin}</h2>
+                <form id="usher-pin-form" class="space-y-4">
+                    <input type="password" id="usher-pin-input" placeholder="${i18n[currentLang].enterPin}" required maxlength="4" class="w-full text-center tracking-[1em] px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <button type="submit" class="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700 transition">${i18n[currentLang].submit}</button>
+                </form>`,
+            usherAddGuest: `
+                <button class="back-btn text-indigo-600 mb-4">&larr; ${i18n[currentLang].back}</button>
+                <h2 class="text-2xl font-bold text-center mb-6">${i18n[currentLang].addGuestManual}</h2>
+                <form id="usher-add-guest-form" class="space-y-4">
+                    <input type="text" id="usher-guest-name" placeholder="${i18n[currentLang].fullName}" required class="w-full px-4 py-3 border border-gray-300 rounded-lg">
+                    <input type="tel" id="usher-guest-phone" placeholder="${i18n[currentLang].phone}" required maxlength="11" pattern="[0-9]*" inputmode="numeric" class="w-full px-4 py-3 border border-gray-300 rounded-lg">
+                    <select id="usher-table-assignment" class="w-full px-4 py-3 border border-gray-300 rounded-lg">
+                        <option value="standing">${i18n[currentLang].standing}</option>
+                        <option value="table">${i18n[currentLang].assignTable}</option>
+                    </select>
+                    <input type="number" id="usher-table-number" placeholder="${i18n[currentLang].tableNumber}" pattern="[0-9]*" inputmode="numeric" class="hidden w-full px-4 py-3 border border-gray-300 rounded-lg">
+                    <input type="number" id="usher-tag-along" placeholder="+ Guests" value="0" min="0" pattern="[0-9]*" inputmode="numeric" class="w-full px-4 py-3 border border-gray-300 rounded-lg">
+                    <button type="submit" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700">${i18n[currentLang].addGuest}</button>
+                </form>`
+        };
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            setupEventListeners();
+            
+            loadEventFromStorage();
+            const savedLang = localStorage.getItem(LANG_STORAGE_KEY);
+            if (savedLang) {
+                currentLang = savedLang;
+                const guestWasLoaded = checkGuestLogin();
+                if (!guestWasLoaded) {
+                    navigateTo('welcome-view');
+                }
+            } else {
+                navigateTo('language-view');
+            }
+        });
+
+        // --- Navigation & UI Rendering ---
+        function navigateTo(viewId) {
+            const allViews = document.querySelectorAll('.view');
+            allViews.forEach(v => v.classList.remove('active'));
+            
+            const targetView = document.getElementById(viewId);
+            if (targetView) {
+                renderViewContent(viewId, () => {
+                    targetView.classList.add('active');
+                    currentView = viewId;
+                    updateHeaderAndNav(viewId);
+                    if (viewId === 'guest-dashboard-view') {
+                        loadGuestEventState();
+                    } else if (viewId === 'couple-dashboard-view') {
+                        renderDashboard();
+                    }
+                });
+            }
+        }
+
+        function renderViewContent(viewId, callback) {
+            const view = document.getElementById(viewId);
+            if (!view) return;
+
+            let template = '';
+            switch(viewId) {
+                case 'language-view': template = templates.languageSelect; break;
+                case 'welcome-view': template = templates.welcome; break;
+                case 'guest-login-view': template = templates.guestLogin; break;
+                case 'guest-dashboard-view': template = templates.guestDashboard; break;
+                case 'couple-login-view': template = templates.coupleLogin; break;
+                case 'usher-pin-view': template = templates.usherPin; break;
+                case 'usher-add-guest-view': template = templates.usherAddGuest; break;
+                case 'couple-dashboard-view':
+                    const requestsView = document.getElementById('dashboard-stats-view');
+                    const chartsView = document.getElementById('dashboard-charts-view');
+                    const guestsView = document.getElementById('dashboard-guests-view');
+                    if (requestsView) requestsView.innerHTML = templates.dashboardStats;
+                    if (chartsView) chartsView.innerHTML = templates.dashboardCharts;
+                    if (guestsView) guestsView.innerHTML = templates.dashboardGuests;
+                    break;
+            }
+            if (template) {
+                view.innerHTML = template;
+            }
+
+            setTimeout(() => {
+                if (viewId === 'couple-login-view' && currentEvent) {
+                    const createSection = document.getElementById('create-event-section');
+                    const qrDisplay = document.getElementById('event-qr-display');
+                    if(createSection) createSection.classList.add('hidden');
+                    if(qrDisplay) qrDisplay.classList.remove('hidden');
+                    displayEventQRCode();
+                }
+                if (callback) callback();
+            }, 0);
+        }
+        
+        function updateHeaderAndNav(viewId) {
+            const header = document.getElementById('app-header');
+            const nav = document.getElementById('app-nav');
+            header.innerHTML = '';
+            header.classList.add('hidden');
+            nav.classList.add('hidden');
+
+            const homeButtonHTML = `<button id="home-btn" class="absolute top-0 left-0 p-1 text-indigo-600 hover:text-indigo-800 transition">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+            </button>`;
+
+            if (viewId.startsWith('guest-dashboard')) {
+                header.classList.remove('hidden');
+                header.innerHTML = `${homeButtonHTML}
+                    <div>
+                        <h1 id="header-title" class="text-2xl font-bold">${currentEvent?.coupleNames || "Wedding Celebration"}</h1>
+                        <p id="header-subtitle" class="text-gray-600">${i18n[currentLang].welcomeGuest}!</p>
+                    </div>`;
+            } else if (viewId.startsWith('couple-dashboard')) {
+                header.classList.remove('hidden');
+                header.innerHTML = `${homeButtonHTML}
+                    <div>
+                        <h1 id="header-title" class="text-2xl font-bold">${i18n[currentLang].dash}</h1>
+                        <p id="header-subtitle" class="text-gray-600">${currentEvent?.coupleNames || ""}</p>
+                    </div>`;
+                nav.classList.remove('hidden');
+                renderNav('couple');
+            }
+        }
+
+        function renderNav(role) {
+            const nav = document.getElementById('app-nav');
+            if (role === 'couple') {
+                nav.innerHTML = `
+                    <button data-subview="dashboard-stats-view" class="nav-btn flex-1 text-center p-2 rounded-full bg-indigo-500 text-white">${i18n[currentLang].stats}</button>
+                    <button data-subview="dashboard-charts-view" class="nav-btn flex-1 text-center p-2 rounded-full text-gray-600">${i18n[currentLang].charts}</button>
+                    <button data-subview="dashboard-guests-view" class="nav-btn flex-1 text-center p-2 rounded-full text-gray-600">${i18n[currentLang].guests}</button>`;
+            }
+        }
+        
+        function navigateSubView(subviewId) {
+            document.querySelectorAll('.dashboard-subview').forEach(sv => sv.classList.add('hidden'));
+            document.getElementById(subviewId).classList.remove('hidden');
+            
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('bg-indigo-500', 'text-white');
+                btn.classList.add('text-gray-600');
+            });
+            document.querySelector(`.nav-btn[data-subview="${subviewId}"]`).classList.add('bg-indigo-500', 'text-white');
+
+            if (subviewId === 'dashboard-charts-view') {
+                renderCharts();
+            }
+        }
+
+        // --- Event Listeners ---
+        function setupEventListeners() {
+            const appContent = document.getElementById('app-content');
+            
+            appContent.onclick = function(e) {
+                const target = e.target;
+                
+                if (target.closest('.role-btn')) navigateTo(target.closest('.role-btn').dataset.target);
+                else if (target.closest('.back-btn')) navigateTo('welcome-view');
+                else if (target.closest('.nav-btn')) navigateSubView(target.closest('.nav-btn').dataset.subview);
+                else if (target.closest('#home-btn')) handleGoHome();
+                else if (target.closest('#guest-logout-btn')) handleGuestLogout();
+                else if (target.closest('#scan-qr-btn')) showScanner();
+                else if (target.closest('#no-table-btn')) handleNoTable();
+                else if (target.closest('.service-btn')) handleServiceRequest(target.closest('.service-btn').dataset.service);
+                else if (target.closest('#add-guests-btn')) showTagAlongModal();
+                else if (target.closest('#go-to-dashboard-btn')) navigateTo('couple-dashboard-view');
+                else if (target.closest('.fulfill-btn')) handleFulfillRequest(target.closest('.fulfill-btn'));
+                else if (target.closest('.lang-btn')) setLanguage(target.closest('.lang-btn').dataset.lang);
+            };
+
+            appContent.onsubmit = function(e) {
+                e.preventDefault();
+                const formId = e.target.id;
+                switch(formId) {
+                    case 'guest-login-form': handleGuestLogin(); break;
+                    case 'create-event-form': handleCreateEvent(); break;
+                    case 'table-form': handleSetTable(); break;
+                    case 'usher-pin-form': handleUsherPin(); break;
+                    case 'usher-add-guest-form': handleUsherAddGuest(); break;
+                    case 'tag-along-form': handleSetTagAlong(e); break;
+                }
+            };
+            
+            appContent.onchange = function(e) {
+                if (e.target.id === 'usher-table-assignment') {
+                    const tableNumberInput = document.getElementById('usher-table-number');
+                    if (e.target.value === 'table') {
+                        tableNumberInput.classList.remove('hidden');
+                        tableNumberInput.required = true;
+                    } else {
+                        tableNumberInput.classList.add('hidden');
+                        tableNumberInput.required = false;
+                    }
+                }
+            };
+
+            document.body.onclick = function(e) {
+                if (e.target.closest('#close-scanner-btn')) hideScanner();
+                if (e.target.closest('#close-tag-along-btn')) hideTagAlongModal();
+            }
+        }
+
+        // --- Data & Theme Management ---
+        function saveEventToStorage() { localStorage.setItem(EVENT_STORAGE_KEY, JSON.stringify(currentEvent)); }
+        function loadEventFromStorage() {
+            const savedEvent = localStorage.getItem(EVENT_STORAGE_KEY);
+            if (savedEvent) {
+                try {
+                    currentEvent = JSON.parse(savedEvent);
+                } catch (e) { localStorage.removeItem(EVENT_STORAGE_KEY); }
+            }
+        }
+        
+        function handleGoHome() {
+            if (currentUser) {
+                currentUser = null;
+                localStorage.removeItem(GUEST_STORAGE_KEY);
+            }
+            navigateTo('welcome-view');
+        }
+
+        function setLanguage(lang) {
+            currentLang = lang;
+            localStorage.setItem(LANG_STORAGE_KEY, lang);
+            navigateTo('welcome-view');
+        }
+
+        // --- Guest Flow ---
+        function checkGuestLogin() {
+            const savedGuest = localStorage.getItem(GUEST_STORAGE_KEY);
+            if (savedGuest) {
+                try {
+                    currentUser = JSON.parse(savedGuest);
+                    navigateTo('guest-dashboard-view');
+                    return true;
+                } catch (e) { localStorage.removeItem(GUEST_STORAGE_KEY); }
+            }
+            return false;
+        }
+        function handleGuestLogin() {
+            if (rateLimit()) return;
+            const name = document.getElementById('guest-name').value.trim();
+            const phone = document.getElementById('guest-phone').value.trim();
+            if (!name || !phone) return;
+            currentUser = { name, phone, checkedIn: false, tagAlong: 0 };
+            localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(currentUser));
+            navigateTo('guest-dashboard-view');
+        }
+
+        function hideAllModals() {
+            document.querySelectorAll('.modal').forEach(modal => modal.classList.remove('active'));
+            if (html5QrCode && html5QrCode.isScanning) {
+                hideScanner();
+            }
+        }
+
+        function handleGuestLogout() {
+            currentUser = null;
+            localStorage.removeItem(GUEST_STORAGE_KEY);
+            hideAllModals(); 
+            navigateTo('welcome-view');
+        }
+        function showScanner() {
+            if (!currentEvent) {
+                showMessage("No event has been created yet.", true);
+                return;
+            }
+            const modal = document.getElementById('scanner-modal');
+            modal.innerHTML = templates.scannerModal;
+            modal.classList.add('active');
+            
+            html5QrCode = new Html5Qrcode("qr-reader");
+            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+            html5QrCode.start({ facingMode: "environment" }, config, onRealScanSuccess, onScanFailure)
+                .catch(err => {
+                    console.error("Unable to start scanning.", err);
+                    showMessage("Could not access camera. Please grant permission.", true);
+                });
+        }
+        function hideScanner() { 
+            if (html5QrCode && html5QrCode.isScanning) {
+                html5QrCode.stop().catch(err => console.error("Scanner stop error", err));
+            }
+            document.getElementById('scanner-modal').classList.remove('active'); 
+        }
+        function onScanFailure(error) { /* Ignore */ }
+        
+        function onRealScanSuccess(decodedText, decodedResult) {
+            try {
+                const data = JSON.parse(decodedText);
+                if (currentEvent && data.eventId === currentEvent.eventId) {
+                    onScanSuccess();
+                } else if (!currentEvent) {
+                    showMessage("No event found on this device. Please create one first.", true);
+                    hideScanner();
+                } else {
+                    showMessage("Scanned QR code is for a different event.", true);
+                }
+            } catch (e) {
+                showMessage("Invalid QR code scanned.", true);
+            }
+        }
+
+        function onScanSuccess() {
+            hideScanner();
+            if (!currentEvent) return;
+
+            const existingGuest = currentEvent.guests.find(g => g.phone === currentUser.phone);
+
+            if (existingGuest) {
+                const checkInTime = new Date(existingGuest.joinedAt).toLocaleTimeString();
+                showMessage(`${i18n[currentLang].lastCheckIn} ${checkInTime}`);
+                currentUser.checkedIn = true;
+                localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(currentUser));
+                loadGuestEventState(); 
+                return;
+            }
+
+            currentEvent.guests.push({ ...currentUser, table: null, food: 'pending', drinks: 'pending', joinedAt: new Date().toISOString() });
+            saveEventToStorage();
+            
+            currentUser.checkedIn = true;
+            localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(currentUser));
+            loadGuestEventState();
+        }
+        
+        function loadGuestEventState() {
+            if (!currentEvent || !currentUser) return;
+            document.getElementById('guest-name-display').textContent = currentUser.name;
+            
+            const guestData = currentEvent.guests.find(g => g.phone === currentUser.phone);
+
+            if (!guestData) {
+                document.getElementById('guest-step-1').classList.remove('hidden');
+                document.getElementById('guest-step-2').classList.add('hidden');
+                document.getElementById('thank-you-note').classList.add('hidden');
+                return;
+            }
+
+            document.getElementById('thank-you-note').innerHTML = `<p class="font-semibold text-indigo-800">${i18n[currentLang].thankYou}</p>
+                <p class="text-sm text-indigo-700 mt-1">${i18n[currentLang].withLove} ${currentEvent.coupleNames}</p>`;
+            document.getElementById('thank-you-note').classList.remove('hidden');
+            document.getElementById('guest-step-1').classList.add('hidden');
+            const step2 = document.getElementById('guest-step-2');
+            step2.classList.remove('hidden');
+            step2.innerHTML = `
+                <h3 class="font-bold text-lg mb-2">${i18n[currentLang].yourTable}</h3>
+                <div id="table-input-section">
+                    <p class="text-gray-600 mb-2">${i18n[currentLang].enterTable}</p>
+                    <form id="table-form" class="flex space-x-2">
+                        <input type="number" id="table-number" placeholder="Table #" required pattern="[0-9]*" inputmode="numeric" class="flex-grow px-4 py-2 border border-gray-300 rounded-lg">
+                        <button type="submit" class="bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg">${i18n[currentLang].set}</button>
+                    </form>
+                    <div class="text-center mt-2">
+                        <button id="no-table-btn" class="text-sm text-gray-500 hover:underline">${i18n[currentLang].noTable}</button>
+                    </div>
+                </div>
+                <div id="service-section" class="hidden mt-4">
+                    <p class="text-gray-600 mb-4">${i18n[currentLang].tableSetTo} <span id="table-display" class="font-bold"></span></p>
+                    <div class="space-y-3">
+                        <button data-service="food" class="service-btn w-full bg-gray-200 text-gray-800 font-bold py-3 px-4 rounded-lg text-left">${i18n[currentLang].foodReq}</button>
+                        <button data-service="drinks" class="service-btn w-full bg-gray-200 text-gray-800 font-bold py-3 px-4 rounded-lg text-left">${i18n[currentLang].drinksReq}</button>
+                        <button id="add-guests-btn" class="w-full mt-2 bg-gray-500 text-white font-bold py-3 px-4 rounded-lg">${i18n[currentLang].addGuests} (+${guestData.tagAlong || 0})</button>
+                    </div>
+                </div>`;
+            
+            if (guestData && guestData.table) {
+                document.getElementById('table-display').textContent = guestData.table;
+                document.getElementById('table-input-section').classList.add('hidden');
+                document.getElementById('service-section').classList.remove('hidden');
+                updateServiceButtons(guestData);
+            }
+        }
+        function handleSetTable() {
+            if (rateLimit()) return;
+            const tableNumber = document.getElementById('table-number').value;
+            if (!tableNumber) return;
+            const guestIndex = currentEvent.guests.findIndex(g => g.phone === currentUser.phone);
+            if (guestIndex > -1) {
+                currentEvent.guests[guestIndex].table = tableNumber;
+                saveEventToStorage();
+                showMessage(`${i18n[currentLang].tableSetTo} ${tableNumber}!`);
+                loadGuestEventState();
+            }
+        }
+        function handleNoTable() {
+            if (rateLimit()) return;
+            const guestIndex = currentEvent.guests.findIndex(g => g.phone === currentUser.phone);
+            if (guestIndex > -1) {
+                currentEvent.guests[guestIndex].table = i18n[currentLang].standing;
+                saveEventToStorage();
+                showMessage(`Your status is set to ${i18n[currentLang].standing}.`);
+                loadGuestEventState();
+            }
+        }
+        function handleServiceRequest(service) {
+             const guestIndex = currentEvent.guests.findIndex(g => g.phone === currentUser.phone);
+             if (guestIndex > -1) {
+                const currentStatus = currentEvent.guests[guestIndex][service];
+                if (currentStatus === 'requesting' || currentStatus === 'served') return;
+                
+                currentEvent.guests[guestIndex][service] = 'requesting';
+                saveEventToStorage();
+                updateServiceButtons(currentEvent.guests[guestIndex]);
+                showMessage(`${service.charAt(0).toUpperCase() + service.slice(1)} requested!`);
+             }
+        }
+        function updateServiceButtons(guestData) {
+            for (const service of ['food', 'drinks']) {
+                const btn = document.querySelector(`.service-btn[data-service="${service}"]`);
+                if(!btn) continue;
+                const status = guestData[service] || 'pending';
+                btn.textContent = `${i18n[currentLang][service+'Req']}: ${status}`;
+                btn.className = 'service-btn w-full font-bold py-3 px-4 rounded-lg text-left transition'; 
+                btn.disabled = false;
+
+                if (status === 'served' || status === 'requesting') {
+                    btn.disabled = true;
+                    btn.classList.add('cursor-not-allowed');
+                    if (status === 'served') {
+                        btn.classList.add('bg-green-500', 'text-white');
+                    } else { 
+                        btn.classList.add('bg-yellow-400', 'text-black');
+                    }
+                } else { 
+                    btn.classList.add('bg-gray-200', 'text-gray-800');
+                }
+            }
+        }
+        function showTagAlongModal() {
+            const modal = document.getElementById('tag-along-modal');
+            modal.innerHTML = templates.tagAlongModal;
+            modal.classList.add('active');
+            document.getElementById('tag-along-count').value = currentUser.tagAlong || 0;
+        }
+        function hideTagAlongModal() { document.getElementById('tag-along-modal').classList.remove('active'); }
+        function handleSetTagAlong(e) {
+            e.preventDefault();
+            const count = document.getElementById('tag-along-count').value;
+            currentUser.tagAlong = parseInt(count, 10) || 0;
+            localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(currentUser));
+
+            const guestIndex = currentEvent.guests.findIndex(g => g.phone === currentUser.phone);
+            if (guestIndex > -1) {
+                currentEvent.guests[guestIndex].tagAlong = currentUser.tagAlong;
+                saveEventToStorage();
+            }
+            hideTagAlongModal();
+            loadGuestEventState();
+        }
+
+        // --- Couple & Usher Flow ---
+        async function handleCreateEvent() {
+            if (rateLimit()) return;
+            const coupleNames = document.getElementById('couple-names-input').value.trim();
+            if (!coupleNames) return;
+
+            const eventId = 'EVT' + Math.random().toString(36).substr(2, 9).toUpperCase();
+            const usherPin = Math.floor(1000 + Math.random() * 9000).toString();
+            currentEvent = { eventId, coupleNames, guests: [], usherPin };
+            saveEventToStorage();
+            navigateTo('couple-login-view');
+        }
+        function displayEventQRCode() {
+            const qrContainer = document.getElementById('event-qr-display');
+            if (!qrContainer) return;
+            const qrData = JSON.stringify({ eventId: currentEvent.eventId });
+            qrContainer.innerHTML = `
+                <h3 class="font-bold text-lg mb-2 text-green-800">${i18n[currentLang].eventCreated}</h3>
+                <p class="text-gray-600 mb-2">${i18n[currentLang].scanToJoinGuests}</p>
+                <div id="event-qrcode" class="flex justify-center p-2 bg-white rounded-md"></div>
+                <div class="mt-4 space-y-2 text-sm text-gray-600">
+                    <p>Event ID: <code class="bg-gray-200 p-1 rounded">${currentEvent.eventId}</code></p>
+                    <p>Usher PIN: <code class="bg-gray-200 p-1 rounded font-bold text-lg">${currentEvent.usherPin}</code></p>
+                </div>
+                <button id="go-to-dashboard-btn" class="mt-4 w-full bg-gray-700 text-white font-bold py-2 px-4 rounded-lg hover:bg-gray-800">${i18n[currentLang].goToDash}</button>`;
+            new QRCode(document.getElementById('event-qrcode'), { text: qrData, width: 128, height: 128 });
+        }
+        function handleUsherPin() {
+            const pin = document.getElementById('usher-pin-input').value;
+            if (currentEvent && pin === currentEvent.usherPin) {
+                navigateTo('usher-add-guest-view');
+            } else {
+                showMessage("Incorrect PIN or no active event.", true);
+            }
+        }
+        function handleUsherAddGuest() {
+            if (!currentEvent) {
+                showMessage("No active event. The couple must create one first.", true);
+                return;
+            }
+            const name = document.getElementById('usher-guest-name').value.trim();
+            const phone = document.getElementById('usher-guest-phone').value.trim();
+            const assignment = document.getElementById('usher-table-assignment').value;
+            const tableNumber = document.getElementById('usher-table-number').value.trim();
+            const tagAlong = parseInt(document.getElementById('usher-tag-along').value, 10) || 0;
+
+            let table;
+            if (assignment === 'table') {
+                if (!tableNumber) {
+                    showMessage("Please enter a table number.", true);
+                    return;
+                }
+                table = tableNumber;
+            } else {
+                table = i18n[currentLang].standing;
+            }
+
+            if (!name || !phone) return;
+
+            const existingGuest = currentEvent.guests.find(g => g.phone === phone);
+            if (existingGuest) {
+                showMessage("A guest with this phone number is already checked in.", true);
+                return;
+            }
+
+            currentEvent.guests.push({ name, phone, table, tagAlong, food: 'pending', drinks: 'pending', joinedAt: new Date().toISOString() });
+            saveEventToStorage();
+            showMessage(`Guest ${name} added successfully!`);
+            document.getElementById('usher-add-guest-form').reset();
+            document.getElementById('usher-table-number').classList.add('hidden');
+        }
+        
+        // --- Dashboard & Charts ---
+        function renderDashboard() {
+            loadEventFromStorage();
+            if (!currentEvent) return;
+            
+            const subtitleEl = document.getElementById('header-subtitle');
+            if (subtitleEl) subtitleEl.textContent = currentEvent.coupleNames || "";
+            
+            const guests = currentEvent.guests || [];
+            const totalGuestsWithTagAlong = guests.reduce((sum, guest) => sum + 1 + (guest.tagAlong || 0), 0);
+            document.getElementById('total-guests-count').textContent = totalGuestsWithTagAlong;
+            
+            const guestListEl = document.getElementById('dashboard-guest-list');
+            const requestsListEl = document.getElementById('requests-list');
+            guestListEl.innerHTML = '';
+            requestsListEl.innerHTML = '';
+            let servedCount = 0;
+
+            guests.forEach(guest => {
+                const tableDisplay = guest.table && !isNaN(guest.table) ? `T${guest.table}` : (guest.table || '?');
+                guestListEl.innerHTML += `<div class="p-3 border-b">
+                    <p class="font-semibold">${guest.name} <span class="font-normal text-gray-500">(+${guest.tagAlong || 0}) - ${tableDisplay}</span></p>
+                    <p class="text-sm text-gray-600">${guest.phone}</p></div>`;
+                
+                let isServed = true;
+                ['food', 'drinks'].forEach(service => {
+                    if (guest[service] !== 'served') isServed = false;
+                    if (guest[service] === 'requesting') {
+                        requestsListEl.innerHTML += `<div class="p-2 bg-yellow-100 rounded-md text-sm flex justify-between items-center mb-1">
+                            <span>${guest.name} (${tableDisplay}) requests ${service}.</span>
+                            <button data-phone="${guest.phone}" data-service="${service}" class="fulfill-btn bg-green-500 text-white px-2 py-1 text-xs rounded hover:bg-green-600">${i18n[currentLang].fulfill}</button>
+                        </div>`;
+                    }
+                });
+                if (isServed) servedCount++;
+            });
+
+            document.getElementById('served-guests-count').textContent = servedCount;
+            if (requestsListEl.innerHTML === '') requestsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">${i18n[currentLang].noActiveReq}</p>`;
+            if (guestListEl.innerHTML === '') guestListEl.innerHTML = `<p class="text-center text-gray-500 p-4">${i18n[currentLang].noGuestsYet}</p>`;
+        }
+        function handleFulfillRequest(target) {
+            const { phone, service } = target.dataset;
+            const guestIndex = currentEvent.guests.findIndex(g => g.phone === phone);
+            if (guestIndex > -1) {
+                currentEvent.guests[guestIndex][service] = 'served';
+                saveEventToStorage();
+                renderDashboard();
+            }
+        }
+        function renderCharts() {
+            if (!currentEvent) return;
+            const guests = currentEvent.guests || [];
+
+            // Pie Chart for Service Status
+            const serviceCtx = document.getElementById('service-pie-chart')?.getContext('2d');
+            if (serviceCtx) {
+                const statusCounts = guests.reduce((acc, guest) => {
+                    const status = (guest.food === 'served' && guest.drinks === 'served') ? 'served' : (guest.food === 'requesting' || guest.drinks === 'requesting') ? 'requesting' : 'pending';
+                    acc[status] = (acc[status] || 0) + 1;
+                    return acc;
+                }, { pending: 0, requesting: 0, served: 0 });
+
+                new Chart(serviceCtx, {
+                    type: 'pie',
+                    data: {
+                        labels: ['Pending', 'Requesting', 'Served'],
+                        datasets: [{
+                            data: [statusCounts.pending, statusCounts.requesting, statusCounts.served],
+                            backgroundColor: ['#A5B4FC', '#FBBF24', '#4ADE80']
+                        }]
+                    }
+                });
+            }
+
+            // Bar Chart for Guests per Table
+            const tableCtx = document.getElementById('table-bar-chart')?.getContext('2d');
+            if (tableCtx) {
+                const tableCounts = guests.reduce((acc, guest) => {
+                    const table = guest.table && !isNaN(guest.table) ? `Table ${guest.table}` : (guest.table || 'N/A');
+                    acc[table] = (acc[table] || 0) + 1 + (guest.tagAlong || 0);
+                    return acc;
+                }, {});
+
+                new Chart(tableCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.keys(tableCounts),
+                        datasets: [{
+                            label: 'Guests',
+                            data: Object.values(tableCounts),
+                            backgroundColor: '#818CF8'
+                        }]
+                    },
+                    options: { scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+                });
+            }
+        }
+
+        // --- Utility ---
+        const toBase64 = file => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = error => reject(error);
+        });
+        function showMessage(message, isError = false) {
+            const box = document.getElementById('message-box');
+            box.textContent = message;
+            box.className = `fixed top-5 right-5 text-white px-6 py-3 rounded-lg shadow-lg transition-all duration-300 ${isError ? 'bg-red-500' : 'bg-green-500'}`;
+            box.style.opacity = 1;
+            box.style.transform = 'translateY(0)';
+            setTimeout(() => {
+                box.style.opacity = 0;
+                box.style.transform = 'translateY(-2.5rem)';
+            }, 3000);
+        }
+        function rateLimit() {
+            const now = Date.now();
+            if (now - lastSubmissionTime < 2000) { // 2-second cooldown
+                showMessage("Please wait a moment before submitting again.", true);
+                return true;
+            }
+            lastSubmissionTime = now;
+            return false;
+        }
+        
+    </script>
+</body>
+</html>
