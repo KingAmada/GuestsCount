@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Scan QR</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    html,body{height:100%;margin:0;background:#0f172a;color:#fff;font-family:system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif}
+    .wrap{max-width:760px;margin:0 auto;padding:16px}
+    #reader{width:100%;max-width:520px;aspect-ratio:1; background:#1f2937;border-radius:16px;margin:24px auto}
+    button{appearance:none;border:0;border-radius:9999px;padding:12px 16px;background:#ef4444;color:#fff;font-weight:700}
+    .hint{opacity:.8;font-size:.95rem}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Point camera at QR</h1>
+    <p class="hint">If asked, allow camera access.</p>
+    <div id="reader"></div>
+    <div style="text-align:center">
+      <button id="cancelBtn">Cancel</button>
+    </div>
+  </div>
+
+  <script>
+    // Accept the origin of the opener so we can safely postMessage back
+    const params = new URLSearchParams(location.search);
+    const targetOrigin = params.get('returnOrigin') || '*';
+
+    let qr = null;
+
+    function post(type, payload) {
+      try { window.opener && window.opener.postMessage({ source:'WEDDING_SCANNER', type, ...payload }, targetOrigin); }
+      catch(e) { /* ignore */ }
+    }
+
+    function stopAndClose() {
+      const p = qr ? qr.stop() : Promise.resolve();
+      p.catch(()=>{}).finally(()=>{ window.close(); });
+    }
+
+    async function start() {
+      qr = new Html5Qrcode('reader');
+      const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+      try {
+        await qr.start({ facingMode: 'environment' }, config, (decodedText) => {
+          // Success! Send text back and close
+          post('result', { text: decodedText });
+          stopAndClose();
+        }, () => {});
+      } catch (err) {
+        // Couldn’t start camera (permissions blocked, etc.)
+        post('error', { error: err?.message || 'Camera not available' });
+        stopAndClose();
+      }
+    }
+
+    document.getElementById('cancelBtn').addEventListener('click', () => {
+      post('error', { error: 'cancelled' });
+      stopAndClose();
+    });
+
+    window.addEventListener('beforeunload', () => { try { qr && qr.stop(); } catch(e){} });
+
+    // Kick off (page was opened via a user click -> satisfies user gesture requirement)
+    start();
+  </script>
+</body>
+</html>
