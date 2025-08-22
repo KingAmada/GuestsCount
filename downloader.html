@@ -1,6 +1,8 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>Download</title>
+<title>Download QR</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
   body{margin:0;display:grid;place-items:center;height:100vh;background:#0f172a;color:#fff;font-family:system-ui,Segoe UI,Roboto,Inter,sans-serif}
   .card{max-width:560px;background:#111827;border-radius:14px;padding:18px;box-shadow:0 10px 20px -10px rgba(2,6,23,.6);text-align:center}
@@ -9,59 +11,54 @@
   .btn{display:inline-block;padding:10px 14px;border-radius:9999px;background:#22c55e;color:#fff;font-weight:700;text-decoration:none;border:0;cursor:pointer}
   .btn + .btn{margin-left:8px;background:#6366f1}
   .hint{opacity:.8;margin-top:8px}
+  #qrbox{position:absolute;left:-9999px;top:-9999px} /* offscreen generator */
 </style>
-<div class="card" id="ui" hidden>
+
+<div class="card">
   <h1>Event QR</h1>
-  <div id="imgwrap"></div>
+  <div id="imgwrap"><p>Preparing your QR…</p></div>
   <div class="row">
-    <a id="save" class="btn">Download</a>
-    <button id="print" class="btn">Print</button>
+    <a id="save" class="btn" download>Download</a>
+    <button id="print" class="btn" type="button">Print</button>
   </div>
   <div class="hint">If download doesn’t start, click Download or long-press the image.</div>
 </div>
+
+<!-- hidden QR render target -->
+<div id="qrbox"></div>
+
 <script>
 (function(){
-  function dataUrlToBlob(url){
-    var parts = String(url).split(',');
-    var mime = (/^data:(.*?);base64/.exec(parts[0])||[])[1] || 'image/png';
-    var bin  = atob(parts[1]||'');
-    var len  = bin.length, u8 = new Uint8Array(len);
-    for (var i=0;i<len;i++) u8[i] = bin.charCodeAt(i);
-    return new Blob([u8], {type:mime});
-  }
+  // Parse ?code=EVTXXXX (required)
+  var params = new URLSearchParams(location.search);
+  var code = (params.get('code')||'').trim();
+  if(!code){ document.getElementById('imgwrap').innerHTML = '<p>No event code provided.</p>'; throw new Error('Missing code'); }
 
-  function ready(){
-    try { window.opener && window.opener.postMessage({source:'QR_DOWNLOADER', type:'ready'}, '*'); } catch(_) {}
-  }
+  // Build the QR payload your app expects
+  var payload = JSON.stringify({ eventId: code });
 
-  window.addEventListener('message', function(ev){
-    // Accept from any origin you use (Wix page / your iframe)
-    var data = ev.data || {};
-    if (data && data.type === 'download-qr' && data.dataUrl){
-      var fileName = (data.fileName || 'event-qr') + '.png';
-      var blob = data.dataUrl.indexOf('data:')===0 ? dataUrlToBlob(data.dataUrl) : null;
-      var href = blob ? (URL || window.URL).createObjectURL(blob) : data.dataUrl;
+  // Generate QR (big so the PNG is crisp)
+  var q = new QRCode(document.getElementById('qrbox'), { text: payload, width: 1024, height: 1024 });
 
-      // Show image + buttons
-      var img = new Image(); img.alt = 'Event QR'; img.src = href;
-      document.getElementById('imgwrap').innerHTML = ''; 
-      document.getElementById('imgwrap').appendChild(img);
-      document.getElementById('ui').hidden = false;
+  // After QR is drawn, convert to PNG and try auto-download
+  setTimeout(function(){
+    var canvas = document.querySelector('#qrbox canvas');
+    if(!canvas){ document.getElementById('imgwrap').innerHTML = '<p>Could not render QR.</p>'; return; }
 
-      // Wire buttons
-      var save = document.getElementById('save');
-      save.href = href; save.download = fileName; save.rel = 'noopener';
+    var dataUrl = canvas.toDataURL('image/png');
+    var fileName = (code.replace(/[^\w.-]+/g,'_') || 'event-qr') + '.png';
 
-      document.getElementById('print').onclick = function(){ print(); };
+    // Show image + wire buttons
+    var img = new Image(); img.alt = 'Event QR'; img.src = dataUrl;
+    var wrap = document.getElementById('imgwrap'); wrap.innerHTML=''; wrap.appendChild(img);
 
-      // Auto-start download (fallback to visible UI)
-      setTimeout(function(){ try{ save.click(); }catch(_){} }, 60);
+    var save = document.getElementById('save');
+    save.href = dataUrl; save.download = fileName; save.rel='noopener';
 
-      // Revoke later
-      setTimeout(function(){ try{ (URL||window.URL).revokeObjectURL(href); }catch(_){} }, 10000);
-    }
-  });
+    document.getElementById('print').onclick = function(){ print(); };
 
-  ready();
+    // Try auto-download (some browsers block; UI remains as fallback)
+    try { save.click(); } catch(_) {}
+  }, 60);
 })();
 </script>
